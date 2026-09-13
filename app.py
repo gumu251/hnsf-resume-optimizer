@@ -1,86 +1,13 @@
 import streamlit as st
 import base64
 import os
-import json
-import hashlib
-import datetime
 from pathlib import Path
 from utils import read_docx, optimize_resume, text_to_docx, generate_template_docx, optimize_resume_keep_format
+from data_manager import init_storage, get_visitor_id, get_visitor_count, add_visitor_count, save_user_data, MAX_OPTIMIZE_TIMES
 
 
-# -------------------------- 用户数据与访问限制配置 --------------------------
-UPLOAD_FOLDER = "user_uploads"
-COUNT_FILE = "visitor_counts.json"
-MAX_OPTIMIZE_TIMES = 10  # 单个访客最大优化次数
-
-# 自动创建数据文件夹
-Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
-
-# 初始化访客计数字典
-if not os.path.exists(COUNT_FILE):
-    with open(COUNT_FILE, "w", encoding="utf-8") as f:
-        json.dump({}, f)
-
-
-def get_visitor_id() -> str:
-    """获取访客唯一标识（基于请求IP哈希）"""
-    try:
-        # 从请求头获取客户端真实IP
-        x_forwarded_for = st.context.request.headers.get("X-Forwarded-For", "")
-        if x_forwarded_for:
-            ip = x_forwarded_for.split(",")[0].strip()
-        else:
-            ip = st.context.request.headers.get("X-Real-IP", "unknown")
-        # 单向哈希，不存明文IP
-        return hashlib.md5(ip.encode()).hexdigest()[:8]
-    except Exception:
-        # 拿不到IP时用会话临时标识
-        if "temp_visitor_id" not in st.session_state:
-            st.session_state["temp_visitor_id"] = "temp_" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
-        return st.session_state["temp_visitor_id"]
-
-
-def get_visitor_count(visitor_id: str) -> int:
-    """查询访客已使用次数"""
-    try:
-        with open(COUNT_FILE, "r", encoding="utf-8") as f:
-            counts = json.load(f)
-        return counts.get(visitor_id, 0)
-    except Exception:
-        return 0
-
-
-def add_visitor_count(visitor_id: str):
-    """访客使用次数+1"""
-    try:
-        with open(COUNT_FILE, "r", encoding="utf-8") as f:
-            counts = json.load(f)
-        counts[visitor_id] = counts.get(visitor_id, 0) + 1
-        with open(COUNT_FILE, "w", encoding="utf-8") as f:
-            json.dump(counts, f, ensure_ascii=False, indent=2)
-    except Exception:
-        pass
-
-
-def save_user_data(visitor_id: str, original_text: str, result_text: str, mode: str):
-    """保存用户上传内容与优化结果"""
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    file_name = f"{timestamp}_{mode}.txt"
-    user_dir = os.path.join(UPLOAD_FOLDER, visitor_id)
-    Path(user_dir).mkdir(exist_ok=True)
-
-    full_content = f"""优化模式：{mode}
-操作时间：{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-访客ID：{visitor_id}
-
-==================== 原始内容 ====================
-{original_text}
-
-==================== 优化结果 ====================
-{result_text}
-"""
-    with open(os.path.join(user_dir, file_name), "w", encoding="utf-8") as f:
-        f.write(full_content)
+# -------------------------- 初始化数据存储 --------------------------
+init_storage()
 
 
 def get_base64_of_bin_file(bin_file):
@@ -366,7 +293,7 @@ if page == "📝 简历智能优化":
 
     st.divider()
     if start_btn and resume_content.strip():
-        # 先校验访客次数
+        # 校验访客次数
         visitor_id = get_visitor_id()
         used_times = get_visitor_count(visitor_id)
         
@@ -387,7 +314,7 @@ if page == "📝 简历智能优化":
             else:
                 result = optimize_resume(resume_content, opt_mode)
         
-        # 成功则记录次数 + 保存数据
+        # 成功则记录次数 + 保存数据 + 同步GitHub
         if not result.startswith("❌"):
             add_visitor_count(visitor_id)
             save_user_data(visitor_id, resume_content, result, opt_mode)
