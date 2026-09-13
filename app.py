@@ -1,19 +1,97 @@
 import streamlit as st
 import base64
 import os
-from utils import read_docx,optimize_resume,text_to_docx,generate_template_docx,optimize_resume_keep_format
+import json
+import hashlib
+import datetime
+from pathlib import Path
+from utils import read_docx, optimize_resume, text_to_docx, generate_template_docx, optimize_resume_keep_format
+
+
+# -------------------------- 用户数据与访问限制配置 --------------------------
+UPLOAD_FOLDER = "user_uploads"
+COUNT_FILE = "visitor_counts.json"
+MAX_OPTIMIZE_TIMES = 10  # 单个访客最大优化次数
+
+# 自动创建数据文件夹
+Path(UPLOAD_FOLDER).mkdir(exist_ok=True)
+
+# 初始化访客计数字典
+if not os.path.exists(COUNT_FILE):
+    with open(COUNT_FILE, "w", encoding="utf-8") as f:
+        json.dump({}, f)
+
+
+def get_visitor_id() -> str:
+    """获取访客唯一标识（基于请求IP哈希）"""
+    try:
+        # 从请求头获取客户端真实IP
+        x_forwarded_for = st.context.request.headers.get("X-Forwarded-For", "")
+        if x_forwarded_for:
+            ip = x_forwarded_for.split(",")[0].strip()
+        else:
+            ip = st.context.request.headers.get("X-Real-IP", "unknown")
+        # 单向哈希，不存明文IP
+        return hashlib.md5(ip.encode()).hexdigest()[:8]
+    except Exception:
+        # 拿不到IP时用会话临时标识
+        if "temp_visitor_id" not in st.session_state:
+            st.session_state["temp_visitor_id"] = "temp_" + datetime.datetime.now().strftime("%Y%m%d%H%M%S%f")
+        return st.session_state["temp_visitor_id"]
+
+
+def get_visitor_count(visitor_id: str) -> int:
+    """查询访客已使用次数"""
+    try:
+        with open(COUNT_FILE, "r", encoding="utf-8") as f:
+            counts = json.load(f)
+        return counts.get(visitor_id, 0)
+    except Exception:
+        return 0
+
+
+def add_visitor_count(visitor_id: str):
+    """访客使用次数+1"""
+    try:
+        with open(COUNT_FILE, "r", encoding="utf-8") as f:
+            counts = json.load(f)
+        counts[visitor_id] = counts.get(visitor_id, 0) + 1
+        with open(COUNT_FILE, "w", encoding="utf-8") as f:
+            json.dump(counts, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def save_user_data(visitor_id: str, original_text: str, result_text: str, mode: str):
+    """保存用户上传内容与优化结果"""
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    file_name = f"{timestamp}_{mode}.txt"
+    user_dir = os.path.join(UPLOAD_FOLDER, visitor_id)
+    Path(user_dir).mkdir(exist_ok=True)
+
+    full_content = f"""优化模式：{mode}
+操作时间：{datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+访客ID：{visitor_id}
+
+==================== 原始内容 ====================
+{original_text}
+
+==================== 优化结果 ====================
+{result_text}
+"""
+    with open(os.path.join(user_dir, file_name), "w", encoding="utf-8") as f:
+        f.write(full_content)
 
 
 def get_base64_of_bin_file(bin_file):
-    with open(bin_file,'rb') as f:
+    with open(bin_file, 'rb') as f:
         data = f.read()
     return base64.b64encode(data).decode()
 
 
 # -------------------------- 模板文件夹配置 --------------------------
 TEMPLATE_FOLDER = "resume_templates"
-os.makedirs(TEMPLATE_FOLDER,exist_ok=True)
-
+os.makedirs(TEMPLATE_FOLDER, exist_ok=True)
 
 def get_local_templates():
     template_list = []
@@ -30,6 +108,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
 
 # -------------------------- 背景图处理 + 暗化 --------------------------
 bg_img_path = "hnsf_bg.jpg"
@@ -51,6 +130,7 @@ except Exception:
         background: #2c3e50 !important;
     }
     """
+
 
 # -------------------------- 全局样式 --------------------------
 st.markdown(f"""
@@ -195,7 +275,8 @@ footer {{
     color: #dddddd !important;
 }}
 </style>
-""",unsafe_allow_html=True)
+""", unsafe_allow_html=True)
+
 
 # -------------------------- 右侧悬浮提示 --------------------------
 st.markdown("""
@@ -212,14 +293,15 @@ st.markdown("""
         </div>
     </details>
 </div>
-""",unsafe_allow_html=True)
+""", unsafe_allow_html=True)
+
 
 # -------------------------- 左侧导航栏 --------------------------
 with st.sidebar:
     st.title("📚 功能导航")
     st.caption("湖南第一师范学院 · 师范生专属")
     st.divider()
-
+    
     page = st.radio(
         "选择服务",
         [
@@ -233,9 +315,10 @@ with st.sidebar:
         ],
         label_visibility="collapsed"
     )
-
+    
     st.divider()
     st.caption("AIGC就业指导与教师招聘智能工具开发项目")
+
 
 # -------------------------- 页面1：简历智能优化 --------------------------
 if page == "📝 简历智能优化":
@@ -243,11 +326,11 @@ if page == "📝 简历智能优化":
     st.caption("基于豆包大模型 · 贴合教师招聘需求 · 保留原文件格式")
     st.divider()
 
-    col1,col2 = st.columns([2,1])
+    col1, col2 = st.columns([2, 1])
     with col1:
         st.subheader("第一步：输入你的简历")
-        input_mode = st.radio("选择输入方式",["粘贴文本","上传Word文档"],horizontal=True)
-
+        input_mode = st.radio("选择输入方式", ["粘贴文本", "上传Word文档"], horizontal=True)
+        
         resume_content = ""
         uploaded_file = None
         if input_mode == "粘贴文本":
@@ -257,7 +340,7 @@ if page == "📝 简历智能优化":
                 placeholder="例如：\n个人信息\n教育背景\n教育实习\n师范技能\n实践经历\n自我评价..."
             )
         else:
-            uploaded_file = st.file_uploader("上传 .docx 格式简历文件",type=["docx"])
+            uploaded_file = st.file_uploader("上传 .docx 格式简历文件", type=["docx"])
             if uploaded_file:
                 try:
                     resume_content = read_docx(uploaded_file)
@@ -271,35 +354,49 @@ if page == "📝 简历智能优化":
         st.subheader("第二步：选择优化模式")
         opt_mode = st.selectbox(
             "优化模式",
-            ["诊断建议","全文优化"],
+            ["诊断建议", "全文优化"],
             help="诊断建议给出评分与修改方向；全文优化直接生成优化后的简历"
         )
-
+        
         st.divider()
-        start_btn = st.button("🚀 开始优化",type="primary",use_container_width=True)
-
+        start_btn = st.button("🚀 开始优化", type="primary", use_container_width=True)
+        
         if not resume_content.strip():
             st.info("请先输入或上传简历内容")
 
     st.divider()
     if start_btn and resume_content.strip():
+        # 先校验访客次数
+        visitor_id = get_visitor_id()
+        used_times = get_visitor_count(visitor_id)
+        
+        if used_times >= MAX_OPTIMIZE_TIMES:
+            st.error(f"⚠️ 已达到最大使用次数（每位访客限用 {MAX_OPTIMIZE_TIMES} 次）")
+            st.stop()
+
         with st.spinner("正在分析简历并生成优化方案，请稍候..."):
             keep_format = False
             docx_bytes = None
 
             if input_mode == "上传Word文档" and uploaded_file and opt_mode == "全文优化":
                 try:
-                    result,docx_bytes = optimize_resume_keep_format(uploaded_file)
+                    result, docx_bytes = optimize_resume_keep_format(uploaded_file)
                     keep_format = True
                 except Exception as e:
                     result = f"❌ {str(e)}"
             else:
-                result = optimize_resume(resume_content,opt_mode)
-
+                result = optimize_resume(resume_content, opt_mode)
+        
+        # 成功则记录次数 + 保存数据
+        if not result.startswith("❌"):
+            add_visitor_count(visitor_id)
+            save_user_data(visitor_id, resume_content, result, opt_mode)
+            st.caption(f"已使用 {used_times + 1}/{MAX_OPTIMIZE_TIMES} 次")
+        
         st.subheader("第三步：优化结果")
         st.markdown(result)
-
-        col_btn1,col_btn2 = st.columns(2)
+        
+        col_btn1, col_btn2 = st.columns(2)
         with col_btn1:
             if keep_format:
                 st.info("💡 页面为纯文本预览，完整格式以下载的Word文档为准")
@@ -345,19 +442,19 @@ elif page == "📄 简历模板下载":
         st.success(f"✅ 已加载 {len(templates)} 个本地模板")
         st.divider()
 
-        for idx,template_file in enumerate(templates):
+        for idx, template_file in enumerate(templates):
             template_name = os.path.splitext(template_file)[0]
-            file_path = os.path.join(TEMPLATE_FOLDER,template_file)
+            file_path = os.path.join(TEMPLATE_FOLDER, template_file)
 
             with st.container():
                 st.subheader(f"📄 {template_name}")
                 st.caption(f"文件名：{template_file}")
 
-                col_left,col_right = st.columns([3,1])
+                col_left, col_right = st.columns([3, 1])
                 with col_left:
                     st.markdown("点击右侧按钮即可下载该模板文件")
                 with col_right:
-                    with open(file_path,"rb") as f:
+                    with open(file_path, "rb") as f:
                         st.download_button(
                             label="📥 下载模板",
                             data=f,
@@ -375,7 +472,7 @@ elif page == "⚠️ 简历撰写注意事项":
     st.caption("结合学院就业指南，整理最核心的撰写要点")
     st.divider()
 
-    col_a,col_b = st.columns(2)
+    col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("✅ 简历9大核心模块")
         st.markdown("""
@@ -383,38 +480,38 @@ elif page == "⚠️ 简历撰写注意事项":
            - 必备：姓名、联系方式（手机、邮箱）
            - 可选：性别、年龄、政治面貌、籍贯、照片
            - 国企、事业单位建议信息填写全面
-
+        
         2. **求职意向**
            - 明确写明意向岗位，至少表明从业方向
            - 让HR一目了然，提高筛选效率
-
+        
         3. **教育背景**
            - 时间倒叙，标注学校、学院、专业、学历
            - 可补充：主修课程、绩点排名、研究项目
            - 与应聘岗位相关的课程重点突出
-
+        
         4. **工作/实习经历（重中之重）**
            - 要素：时间、单位、部门、职位、具体内容
            - 推荐使用 **STAR法则** 撰写：情境、目标、行动、结果
            - 量化成果，用数字体现价值
-
+        
         5. **项目经历**
            - 重要课题、独立项目可单独列出
            - 体现动手能力与专业技能掌握程度
-
+        
         6. **社会实践**
            - 学生会、社团、支教、志愿活动
            - 与岗位相关的重点写，关联度不高的带过
-
+        
         7. **奖励情况**
            - 强调奖励级别与含金量，标注获奖范围
            - 按岗位需求筛选，不必全部罗列
-
+        
         8. **技能证书**
            - 英语：四六级分数，成绩好建议写出
            - 计算机：Office等办公软件应用能力
            - 专业：教师资格证、普通话、三笔字
-
+        
         9. **自我评价**
            - 3个核心能力/特点，结合求职意向
            - 不堆砌形容词，突出岗位匹配度
@@ -426,24 +523,24 @@ elif page == "⚠️ 简历撰写注意事项":
         1. **排版混乱**
            - 超过两页、字体不统一、间距杂乱
            - 出现错别字、语病、格式错误
-
+        
         2. **内容空洞**
            - “工作认真负责”“热爱教育”等无支撑的空话
            - 只写岗位职责，不写工作成果
-
+        
         3. **方向跑偏**
            - 大篇幅写与教育无关的兼职经历
            - 堆砌无关技能证书，偏离教师岗位
-
+        
         4. **信息缺失**
            - 不写应聘岗位、联系方式缺失
            - 实习不写学校、年级、学科、时长
-
+        
         5. **照片随意**
            - 使用大头照、生活照、过度美颜
            - 建议使用标准证件照，正式得体
         """)
-
+    
     st.divider()
     st.subheader("📌 STAR法则撰写公式")
     st.markdown("""
@@ -451,19 +548,19 @@ elif page == "⚠️ 简历撰写注意事项":
     - **Target（目标）**：你是如何明确你的目标
     - **Action（行动）**：针对情况分析，你采取了什么行动
     - **Result（结果）**：结果怎样，学到了什么
-
+    
     示例：
     > 担任实习班主任期间（S），负责班级学风建设与后进生转化（T），建立学生成长档案，开展一对一谈心与家校沟通（A），期末班级作业完成率提升至100%，5名后进生成绩明显进步（R）。
     """)
 
 
-# -------------------------- 页面4：就业途径与招聘速递（根据就业指南重写） --------------------------
+# -------------------------- 页面4：就业途径与招聘速递 --------------------------
 elif page == "📢 就业途径与招聘速递":
     st.title("📢 就业途径与招聘速递")
     st.caption("依据初等教育学院2027届就业指南整理")
     st.divider()
 
-    tab1,tab2,tab3,tab4 = st.tabs(["校园招聘","校外招聘","政策性岗位","基层就业项目"])
+    tab1, tab2, tab3, tab4 = st.tabs(["校园招聘", "校外招聘", "政策性岗位", "基层就业项目"])
 
     with tab1:
         st.subheader("校园招聘活动")
@@ -480,15 +577,15 @@ elif page == "📢 就业途径与招聘速递":
         1. **线下双选会**
            - 学校定期举办综合类双选会、行业专场双选会
            - 信息通过学校就业信息网、「湖南第一师范学院就业创业云平台」公众号发布
-
+        
         2. **专场宣讲/云宣讲**
            - 用人单位线下专场宣讲或线上腾讯会议宣讲
            - 场地多在葵园楼321活动室，或各二级学院承办
-
+        
         3. **在线招聘**
            - 学校每天审核发布用人单位在线招聘
            - 可通过就业网或公众号菜单栏投递简历
-
+        
         4. **学院专场招聘**
            - 学院利用校友、实习基地资源举办的专场招聘
            - 针对性强、竞争小，是本专业毕业生的黄金渠道
@@ -502,21 +599,21 @@ elif page == "📢 就业途径与招聘速递":
         1. **国家大学生就业服务平台（24365平台）**
            - 教育部主办，关注公众号“ncssfwh”获取资讯
            - 学信网账号登录，登记就业意愿获得精准职位推荐
-
+        
         2. **省级就业促进活动**
            - 湖南省“校园招聘月”“就业促进月”系列活动
            - 区域性、行业性毕业生供需见面会
-
+        
         3. **社会招聘平台**
            - 综合类：共青团中央、创青春、易展翅、中智、智联、前程无忧、BOSS直聘
            - 湖南本地：湖南人才网、长沙人才网
            - 教师类：智浪教育、华图教师、湖南中公教育
            - 公考类：中国人事考试网、湖南人事考试网
-
+        
         4. **用人单位官网/公众号**
            - 官方渠道发布的招聘信息最权威
            - 可直接通过官方途径投递简历
-
+        
         5. **校友/亲友内推**
            - 定位准确、成功率高，节省筛选时间
            - 多联系学长学姐，积累内推资源
@@ -564,17 +661,17 @@ elif page == "📢 就业途径与招聘速递":
         - 高校、科研院所、企业科研辅助岗位
         - 可关注高校人才网官方渠道信息
         """)
-
+        
         st.info("💡 国家对基层服务项目毕业生有明确激励政策，服务期满考核合格，在工龄、社保、公考、考研等方面均有倾斜。")
 
 
-# -------------------------- 页面5：求职面试备考指南（根据就业指南重写） --------------------------
+# -------------------------- 页面5：求职面试备考指南 --------------------------
 elif page == "🎤 求职面试备考指南":
     st.title("🎤 求职面试备考指南")
     st.caption("依据学院就业指导内容整理，实用可落地")
     st.divider()
 
-    tab1,tab2,tab3 = st.tabs(["面试技巧","教师高频真题","择业观念建议"])
+    tab1, tab2, tab3 = st.tabs(["面试技巧", "教师高频真题", "择业观念建议"])
 
     with tab1:
         st.subheader("面试全流程技巧")
@@ -646,17 +743,17 @@ elif page == "🎤 求职面试备考指南":
         """)
 
 
-# -------------------------- 页面6：就业避坑与暖心提示（根据就业指南重写） --------------------------
+# -------------------------- 页面6：就业避坑与暖心提示 --------------------------
 elif page == "💛 就业避坑与暖心提示":
     st.title("💛 就业避坑与暖心提示")
     st.caption("学院官方求职避坑指南 + 暖心寄语")
     st.divider()
 
-    tab1,tab2,tab3 = st.tabs(["求职避坑指南","就业数据参考","学院寄语"])
+    tab1, tab2, tab3 = st.tabs(["求职避坑指南", "就业数据参考", "学院寄语"])
 
     with tab1:
         st.subheader("求职八大陷阱")
-        col1,col2 = st.columns(2)
+        col1, col2 = st.columns(2)
         with col1:
             st.markdown("""
             **1. 黑中介陷阱**
@@ -734,6 +831,7 @@ elif page == "💛 就业避坑与暖心提示":
 
 # -------------------------- 页面7：新生祝福彩蛋 --------------------------
 elif page == "🎁 新生祝福彩蛋":
+    st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown("""
     <div style="text-align: center;">
         <h1 style="color: #ffffff; font-size: 42px;">致湖南第一师范学院</h1>
@@ -754,11 +852,12 @@ elif page == "🎁 新生祝福彩蛋":
         </p>
         <br><br>
         <p style="color: #dddddd; font-size: 15px; line-height: 2;">
-            指导老师：阳丽
-            项目成员：许自富、李勋、戴煜洋、陈云、
+            项目成员：阳丽、许自富（主要技术负责人）、戴煜洋、陈云、李勋
         </p>
     </div>
-    """,unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
+    st.markdown("<br><br><br>", unsafe_allow_html=True)
+
 
 # -------------------------- 页脚 --------------------------
 st.divider()
