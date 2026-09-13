@@ -250,7 +250,7 @@ with st.sidebar:
 # -------------------------- 页面1：简历智能优化 --------------------------
 if page == "📝 简历智能优化":
     st.title("📝 公费师范生简历智能优化")
-    st.caption("基于豆包大模型 · 贴合教师招聘需求 · 保留原文件格式")
+    st.caption("基于豆包大模型 · 贴合教师招聘需求 ")
     st.divider()
 
     col1, col2 = st.columns([2, 1])
@@ -779,7 +779,7 @@ elif page == "🎁 新生祝福彩蛋":
         </p>
         <br><br>
         <p style="color: #dddddd; font-size: 15px; line-height: 2;">
-            项目成员：阳丽、许自富（主要技术负责人）、戴煜洋、陈云、李勋
+            项目成员：阳丽、许自富（技术负责人）、戴煜洋、陈云、李勋
         </p>
     </div>
     """, unsafe_allow_html=True)
