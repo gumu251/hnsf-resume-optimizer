@@ -5,6 +5,30 @@ from pathlib import Path
 from utils import read_docx, optimize_resume, text_to_docx, generate_template_docx, optimize_resume_keep_format
 from data_manager import init_storage, get_visitor_id, get_visitor_count, add_visitor_count, save_user_data, MAX_OPTIMIZE_TIMES
 
+import streamlit as st
+
+# 隐藏用户头像、名称及顶部多余菜单
+hide_style = """
+<style>
+/* 隐藏用户头像+名字标签 */
+[data-testid="stUserAvatar"] {
+    display: none !important;
+}
+/* 隐藏左上角Streamlit logo */
+[data-testid="stLogo"] {
+    display: none !important;
+}
+/* 隐藏右上角汉堡菜单 */
+[data-testid="stMainMenu"] {
+    display: none !important;
+}
+</style>
+"""
+st.markdown(hide_style, unsafe_allow_html=True)
+
+# 下方继续写你原本的页面代码
+
+
 
 # -------------------------- 初始化数据存储 --------------------------
 init_storage()
